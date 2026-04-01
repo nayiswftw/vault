@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client"
+  output   = "./generated"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  VIEWER  @map("viewer")
+  ANALYST @map("analyst")
+  ADMIN   @map("admin")
+}
+
+enum RecordType {
+  INCOME  @map("income")
+  EXPENSE @map("expense")
+}
+
+model User {
+  id           String            @id @default(cuid())
+  name         String
+  email        String            @unique
+  passwordHash String
+  role         Role              @default(VIEWER)
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  records      FinancialRecord[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model FinancialRecord {
+  id              String     @id @default(cuid())
+  amount          Decimal    @db.Decimal(12, 2)
+  type            RecordType
+  category        String
+  date            DateTime
+  notes           String?
+  createdByUserId String
+  createdBy       User       @relation(fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  @@index([date])
+  @@index([type])
+  @@index([category])
+  @@index([createdByUserId])
+  @@map("financial_records")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  entityId     String
+  entityType   String
+  action       String   // CREATE, UPDATE, DELETE
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  previousData Json?
+  newData      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([entityId])
+  @@index([userId])
+  @@map("audit_logs")
+}

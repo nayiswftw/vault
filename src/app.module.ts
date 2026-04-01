@@ -26,6 +26,7 @@ import { UsersModule } from './users/users.module';
         DATABASE_URL: Joi.string().required(),
         JWT_SECRET: Joi.string().min(32).required(),
         JWT_EXPIRES_IN: Joi.string().default('1h'),
+        JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
         CORS_ORIGIN: Joi.string().default('*'),
         THROTTLE_TTL_MS: Joi.number().integer().positive().default(60000),
         THROTTLE_LIMIT: Joi.number().integer().positive().default(100),

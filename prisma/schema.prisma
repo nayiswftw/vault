@@ -30,6 +30,7 @@ model User {
   updatedAt    DateTime          @updatedAt
   records      FinancialRecord[]
   auditLogs    AuditLog[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
 }
@@ -68,4 +69,23 @@ model AuditLog {
   @@index([entityId])
   @@index([userId])
   @@map("audit_logs")
+}
+
+model RefreshToken {
+  id                String   @id
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tokenHash         String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  lastUsedAt        DateTime?
+  userAgent         String?
+  ipAddress         String?
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
 }

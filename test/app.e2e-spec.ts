@@ -11,6 +11,7 @@ import { UsersService } from './../src/users/users.service';
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
   let adminToken: string;
+  let adminRefreshToken: string;
   let analystToken: string;
   let viewerToken: string;
   let createdRecordId: string;
@@ -23,7 +24,10 @@ describe('AppController (e2e)', () => {
   let dashboardStartDate: string;
   let dashboardEndDate: string;
 
-  const login = async (email: string, password: string): Promise<string> => {
+  const login = async (
+    email: string,
+    password: string,
+  ): Promise<{ accessToken: string; refreshToken: string }> => {
     const response = await request(app.getHttpServer())
       .post('/auth/login')
       .send({
@@ -31,11 +35,23 @@ describe('AppController (e2e)', () => {
         password,
       });
 
-    const body = response.body as unknown as { accessToken: string };
+    const body = response.body as unknown as {
+      accessToken: string;
+      refreshToken: string;
+    };
 
     expect(response.status).toBe(200);
     expect(body).toHaveProperty('accessToken');
-    return body.accessToken;
+    expect(body).toHaveProperty('refreshToken');
+    return {
+      accessToken: body.accessToken,
+      refreshToken: body.refreshToken,
+    };
+  };
+
+  const getSessionIdFromRefreshToken = (refreshToken: string): string => {
+    const [sessionId] = refreshToken.split('.');
+    return sessionId;
   };
 
   beforeAll(async () => {
@@ -110,9 +126,15 @@ describe('AppController (e2e)', () => {
       isActive: true,
     });
 
-    adminToken = await login(adminEmail, 'Admin123!');
-    analystToken = await login(analystEmail, 'Analyst123!');
-    viewerToken = await login(viewerEmail, 'Viewer123!');
+    const adminLogin = await login(adminEmail, 'Admin123!');
+    adminToken = adminLogin.accessToken;
+    adminRefreshToken = adminLogin.refreshToken;
+
+    const analystLogin = await login(analystEmail, 'Analyst123!');
+    analystToken = analystLogin.accessToken;
+
+    const viewerLogin = await login(viewerEmail, 'Viewer123!');
+    viewerToken = viewerLogin.accessToken;
   });
 
   it('/health (GET)', () => {
@@ -159,6 +181,8 @@ describe('AppController (e2e)', () => {
     expect(response.status).toBe(200);
     expect(body.openapi).toEqual(expect.any(String));
     expect(body.paths).toHaveProperty('/auth/login');
+    expect(body.paths).toHaveProperty('/auth/refresh');
+    expect(body.paths).toHaveProperty('/auth/sessions');
     expect(body.paths).toHaveProperty('/records');
     expect(body.paths).toHaveProperty('/users/{id}');
     expect(body.paths).toHaveProperty('/audit-logs');
@@ -201,6 +225,131 @@ describe('AppController (e2e)', () => {
     expect(body.email).toBe(analystEmail);
     expect(body.role).toBe(Role.Analyst);
     expect(body.isActive).toBe(true);
+  });
+
+  it('rotates refresh tokens and rejects token reuse', async () => {
+    const previousRefreshToken = adminRefreshToken;
+
+    const refreshResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({
+        refreshToken: previousRefreshToken,
+      });
+
+    const refreshBody = refreshResponse.body as unknown as {
+      accessToken: string;
+      refreshToken: string;
+      tokenType: string;
+    };
+
+    expect(refreshResponse.status).toBe(200);
+    expect(refreshBody.tokenType).toBe('Bearer');
+    expect(refreshBody.refreshToken).not.toBe(previousRefreshToken);
+
+    adminToken = refreshBody.accessToken;
+    adminRefreshToken = refreshBody.refreshToken;
+
+    const reusedResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({
+        refreshToken: previousRefreshToken,
+      });
+
+    expect(reusedResponse.status).toBe(401);
+  });
+
+  it('lists sessions and revokes a specific session', async () => {
+    const secondaryLogin = await login(adminEmail, 'Admin123!');
+    const secondarySessionId = getSessionIdFromRefreshToken(
+      secondaryLogin.refreshToken,
+    );
+
+    const sessionsResponse = await request(app.getHttpServer())
+      .get('/auth/sessions')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    const sessionsBody = sessionsResponse.body as unknown as {
+      data: Array<{ id: string }>;
+    };
+
+    expect(sessionsResponse.status).toBe(200);
+    expect(sessionsBody.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: secondarySessionId,
+        }),
+      ]),
+    );
+
+    const revokeResponse = await request(app.getHttpServer())
+      .delete(`/auth/sessions/${secondarySessionId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(revokeResponse.status).toBe(200);
+    expect(revokeResponse.body).toEqual({
+      revokedSessionId: secondarySessionId,
+    });
+
+    const refreshWithRevokedSessionResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({
+        refreshToken: secondaryLogin.refreshToken,
+      });
+
+    expect(refreshWithRevokedSessionResponse.status).toBe(401);
+  });
+
+  it('logs out by revoking refresh token session', async () => {
+    const tempLogin = await login(analystEmail, 'Analyst123!');
+    const tempSessionId = getSessionIdFromRefreshToken(tempLogin.refreshToken);
+
+    const logoutResponse = await request(app.getHttpServer())
+      .post('/auth/logout')
+      .send({
+        refreshToken: tempLogin.refreshToken,
+      });
+
+    expect(logoutResponse.status).toBe(200);
+    expect(logoutResponse.body).toEqual({
+      revokedSessionId: tempSessionId,
+    });
+
+    const refreshAfterLogoutResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({
+        refreshToken: tempLogin.refreshToken,
+      });
+
+    expect(refreshAfterLogoutResponse.status).toBe(401);
+  });
+
+  it('revokes all sessions and allows fresh login afterwards', async () => {
+    const currentAdminLogin = await login(adminEmail, 'Admin123!');
+    adminToken = currentAdminLogin.accessToken;
+    adminRefreshToken = currentAdminLogin.refreshToken;
+
+    const revokeAllResponse = await request(app.getHttpServer())
+      .post('/auth/sessions/revoke-all')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    const revokeAllBody = revokeAllResponse.body as unknown as {
+      revokedSessions: number;
+    };
+
+    expect(revokeAllResponse.status).toBe(200);
+    expect(revokeAllBody.revokedSessions).toBeGreaterThanOrEqual(1);
+
+    const refreshResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({
+        refreshToken: adminRefreshToken,
+      });
+
+    expect(refreshResponse.status).toBe(401);
+
+    const adminLogin = await login(adminEmail, 'Admin123!');
+    adminToken = adminLogin.accessToken;
+    adminRefreshToken = adminLogin.refreshToken;
   });
 
   it('blocks viewer from creating records', async () => {

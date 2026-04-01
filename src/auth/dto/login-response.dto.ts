@@ -5,11 +5,17 @@ export class LoginResponseDto {
   @ApiProperty()
   accessToken!: string;
 
+  @ApiProperty()
+  refreshToken!: string;
+
   @ApiProperty({ example: 'Bearer' })
   tokenType!: 'Bearer';
 
   @ApiProperty()
   expiresIn!: string;
+
+  @ApiProperty()
+  refreshTokenExpiresIn!: string;
 
   @ApiProperty()
   user!: AuthenticatedUser;

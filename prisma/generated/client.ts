@@ -54,3 +54,8 @@ export type FinancialRecord = Prisma.FinancialRecordModel
  * 
  */
 export type AuditLog = Prisma.AuditLogModel
+/**
+ * Model RefreshToken
+ * 
+ */
+export type RefreshToken = Prisma.RefreshTokenModel

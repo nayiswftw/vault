@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { hash } from 'bcryptjs';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient, Role } from './generated/client';
 
 interface SeedUser {
   name: string;
